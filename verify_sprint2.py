@@ -1,12 +1,9 @@
 import requests
-import json
 import sys
+import random
 from datetime import datetime, timedelta
 
 BASE_URL = "http://127.0.0.1:8000"
-
-def print_step(msg):
-    print(f"\n[STEP] {msg}")
 
 def check(label, condition):
     if condition:
@@ -15,23 +12,22 @@ def check(label, condition):
         print(f"  [FAIL] {label}")
         sys.exit(1)
 
-def register_and_login(email, role, interests, faculty):
+def register_and_login(email, role, interests, faculty, department):
     res = requests.post(f"{BASE_URL}/api/auth/register/", json={
         "email": email,
         "password": "Password123!",
         "full_name": "Test User",
-        "department": "CS",
+        "department": department,
         "faculty": faculty,
         "role": role,
         "interests": interests
     })
-    # If 400 because email already exists, just login
     if res.status_code == 400 and "already exists" in str(res.json()):
         pass
     elif res.status_code != 201:
         print("Registration failed:", res.json())
         sys.exit(1)
-        
+
     res = requests.post(f"{BASE_URL}/api/auth/login/", json={
         "email": email,
         "password": "Password123!"
@@ -41,74 +37,154 @@ def register_and_login(email, role, interests, faculty):
         sys.exit(1)
     return res.json()['access']
 
-# ── Clean up db first to ensure tests pass ──
-# Not deleting db, just making sure emails are unique
-import random
-rid = random.randint(1000, 9999)
 
-# a. Register & login organiser
-print_step("Register and login ORGANISER")
-org1_token = register_and_login(f"org1_{rid}@test.com", "organiser", ["technology"], "Computing")
+def score_event_locally(event, user_categories, user_faculty, user_dept):
+    """Mirror the server-side scoring so we can print scores."""
+    score = 0
+    if event['category'] in user_categories:
+        score += 2
+    tf = event.get('target_faculty')
+    if not tf or tf == user_faculty:
+        score += 1
+    td = event.get('target_department')
+    if not td or td == user_dept:
+        score += 1
+    return score
 
-# b. Create 3 events as organiser
-print_step("Create 3 events as ORGANISER")
+
+rid = random.randint(10000, 99999)
 future_date = (datetime.now() + timedelta(days=3)).isoformat() + "Z"
 
-events = [
-    {"title": "Cultural Event", "description": "Desc", "category": "cultural", "date_time": future_date, "venue": "Hall B", "capacity": 100, "event_type": "free", "ticket_price": "0.00"},
-    {"title": "Sports Event", "description": "Desc", "category": "sports", "date_time": future_date, "venue": "Field", "capacity": 100, "event_type": "free", "ticket_price": "0.00"},
-    {"title": "Academic Event", "description": "Desc", "category": "academic", "date_time": future_date, "venue": "Hall A", "capacity": 100, "event_type": "free", "ticket_price": "0.00"}
+# ── Step A: Register and login ORGANISER ─────────────────────────────────
+print("\n[A] Register and login ORGANISER")
+org_token = register_and_login(f"org_s2v2_{rid}@test.com", "organiser", ["technology"], "Computing", "CS")
+
+# ── Step B: Create 3 events ─────────────────────────────────────────────
+print("\n[B] Create 3 test events")
+events_data = [
+    {
+        "title": "Academic Computing Seminar",
+        "description": "Deep dive into algorithms",
+        "category": "academic",
+        "date_time": future_date,
+        "venue": "Hall A",
+        "capacity": 100,
+        "event_type": "free",
+        "ticket_price": "0.00",
+        "target_faculty": "Computing",
+        "target_department": None      # open to all departments
+    },
+    {
+        "title": "Cultural Night",
+        "description": "University-wide cultural celebration",
+        "category": "cultural",
+        "date_time": future_date,
+        "venue": "Main Auditorium",
+        "capacity": 200,
+        "event_type": "free",
+        "ticket_price": "0.00",
+        "target_faculty": None,        # open to all faculties
+        "target_department": None       # open to all departments
+    },
+    {
+        "title": "Arts Faculty Sports Day",
+        "description": "Sports competition for Arts students",
+        "category": "sports",
+        "date_time": future_date,
+        "venue": "Sports Complex",
+        "capacity": 150,
+        "event_type": "free",
+        "ticket_price": "0.00",
+        "target_faculty": "Arts",
+        "target_department": None       # open to all departments within Arts
+    },
 ]
 
 event_ids = []
-for ev in events:
-    res = requests.post(f"{BASE_URL}/api/events/", json=ev, headers={"Authorization": f"Bearer {org1_token}"})
-    check(f"Created event: {ev['title']}", res.status_code == 201)
+for ev in events_data:
+    res = requests.post(f"{BASE_URL}/api/events/", json=ev, headers={"Authorization": f"Bearer {org_token}"})
+    check(f"Created: {ev['title']}", res.status_code == 201)
     event_ids.append(res.json()['id'])
 
-# c. Register & login student matching 'academic' and 'Computing'
-print_step("Register and login STUDENT 1 (academic, Computing)")
-stu1_token = register_and_login(f"stu1_{rid}@test.com", "student", ["academic"], "Computing")
+# ── Step C: Register STUDENT 1 ──────────────────────────────────────────
+print("\n[C] Register STUDENT 1 (interests=[academic], faculty=Computing, dept=Computer Science)")
+stu1_token = register_and_login(f"stu1_s2v2_{rid}@test.com", "student", ["academic"], "Computing", "Computer Science")
 
-# d & e. Get recommended events for Student 1
-print_step("Get recommended events for STUDENT 1")
+# ── Step D+E: Recommended events for Student 1 ──────────────────────────
+print("\n[D/E] Recommended events for STUDENT 1:")
 res = requests.get(f"{BASE_URL}/api/events/recommended/", headers={"Authorization": f"Bearer {stu1_token}"})
-rec_events1 = res.json()
-print("  Ranking for Student 1:")
-for ev in rec_events1:
-    print(f"    - {ev['title']} (Cat: {ev['category']}, Fac: {ev['organiser']['full_name']})")
+all_rec1 = res.json()
 
-check("Academic event is FIRST (matches both interest and faculty)", rec_events1[0]['title'] == "Academic Event")
+# Filter to only the 3 events created in this test run
+rec1 = [e for e in all_rec1 if e['id'] in event_ids]
 
-# f. Register & login student matching nothing
-print_step("Register and login STUDENT 2 (social, Arts)")
-stu2_token = register_and_login(f"stu2_{rid}@test.com", "student", ["social"], "Arts")
+stu1_cats = ["academic"]
+stu1_fac = "Computing"
+stu1_dept = "Computer Science"
 
-print_step("Get recommended events for STUDENT 2")
+print(f"  Student profile: interests={stu1_cats}, faculty={stu1_fac}, dept={stu1_dept}")
+print(f"  (Showing only the 3 test events out of {len(all_rec1)} total)")
+print(f"  {'Rank':<6} {'Title':<30} {'Category':<12} {'Target Fac':<14} {'Target Dept':<14} {'Score'}")
+print(f"  {'-'*6} {'-'*30} {'-'*12} {'-'*14} {'-'*14} {'-'*5}")
+for i, ev in enumerate(rec1, 1):
+    sc = score_event_locally(ev, stu1_cats, stu1_fac, stu1_dept)
+    tf = ev.get('target_faculty') or '(open)'
+    td = ev.get('target_department') or '(open)'
+    print(f"  {i:<6} {ev['title']:<30} {ev['category']:<12} {tf:<14} {td:<14} {sc}")
+
+check("Event 1 (academic+Computing) is FIRST with score 4", 
+      rec1[0]['category'] == 'academic' and score_event_locally(rec1[0], stu1_cats, stu1_fac, stu1_dept) == 4)
+check("Event 2 (cultural, open) is SECOND with score 2",
+      rec1[1]['category'] == 'cultural' and score_event_locally(rec1[1], stu1_cats, stu1_fac, stu1_dept) == 2)
+check("Event 3 (sports, Arts) is LAST with score 1",
+      rec1[2]['category'] == 'sports' and score_event_locally(rec1[2], stu1_cats, stu1_fac, stu1_dept) == 1)
+
+# ── Step F: Register STUDENT 2 (no matching interests/faculty) ───────────
+print("\n[F] Register STUDENT 2 (interests=[social], faculty=Arts, dept=Fine Arts)")
+stu2_token = register_and_login(f"stu2_s2v2_{rid}@test.com", "student", ["social"], "Arts", "Fine Arts")
+
+print("\n    Recommended events for STUDENT 2:")
 res = requests.get(f"{BASE_URL}/api/events/recommended/", headers={"Authorization": f"Bearer {stu2_token}"})
-rec_events2 = res.json()
-print("  Ranking for Student 2:")
-for ev in rec_events2:
-    print(f"    - {ev['title']} (Cat: {ev['category']}, Fac: {ev['organiser']['full_name']})")
+all_rec2 = res.json()
 
-order1 = [e['id'] for e in rec_events1]
-order2 = [e['id'] for e in rec_events2]
-check("Order is different for Student 2", order1 != order2)
+# Filter to only the 3 events created in this test run
+rec2 = [e for e in all_rec2 if e['id'] in event_ids]
 
-# g. Student tries to create an event
-print_step("Student tries to create an event")
-res = requests.post(f"{BASE_URL}/api/events/", json=events[0], headers={"Authorization": f"Bearer {stu1_token}"})
+stu2_cats = ["social"]
+stu2_fac = "Arts"
+stu2_dept = "Fine Arts"
+
+print(f"  Student profile: interests={stu2_cats}, faculty={stu2_fac}, dept={stu2_dept}")
+print(f"  (Showing only the 3 test events out of {len(all_rec2)} total)")
+print(f"  {'Rank':<6} {'Title':<30} {'Category':<12} {'Target Fac':<14} {'Target Dept':<14} {'Score'}")
+print(f"  {'-'*6} {'-'*30} {'-'*12} {'-'*14} {'-'*14} {'-'*5}")
+for i, ev in enumerate(rec2, 1):
+    sc = score_event_locally(ev, stu2_cats, stu2_fac, stu2_dept)
+    tf = ev.get('target_faculty') or '(open)'
+    td = ev.get('target_department') or '(open)'
+    print(f"  {i:<6} {ev['title']:<30} {ev['category']:<12} {tf:<14} {td:<14} {sc}")
+
+check("Student 2 sees all 3 test events", len(rec2) == 3)
+order1 = [e['id'] for e in rec1]
+order2 = [e['id'] for e in rec2]
+check("Ranking order differs between Student 1 and Student 2", order1 != order2)
+
+# ── Step G: Student tries to create event (should be 403) ───────────────
+print("\n[G] Student tries to create an event")
+res = requests.post(f"{BASE_URL}/api/events/", json=events_data[0], headers={"Authorization": f"Bearer {stu1_token}"})
 check("Rejected with 403 Forbidden", res.status_code == 403)
 
-# h. Different organiser tries to edit/cancel event
-print_step("Different organiser tries to edit/cancel event")
-org2_token = register_and_login(f"org2_{rid}@test.com", "organiser", ["sports"], "Computing")
+# ── Step H: Different organiser tries to edit/cancel (should be 403) ────
+print("\n[H] Different organiser tries to edit/cancel another's event")
+org2_token = register_and_login(f"org2_s2v2_{rid}@test.com", "organiser", ["sports"], "Arts", "Drama")
 
-target_event_id = event_ids[0]
-res = requests.put(f"{BASE_URL}/api/events/{target_event_id}/", json={"title": "Hacked"}, headers={"Authorization": f"Bearer {org2_token}"})
+target_id = event_ids[0]
+res = requests.put(f"{BASE_URL}/api/events/{target_id}/", json={"title": "Hacked"}, headers={"Authorization": f"Bearer {org2_token}"})
 check("Edit rejected with 403 Forbidden", res.status_code == 403)
 
-res = requests.delete(f"{BASE_URL}/api/events/{target_event_id}/", headers={"Authorization": f"Bearer {org2_token}"})
+res = requests.delete(f"{BASE_URL}/api/events/{target_id}/", headers={"Authorization": f"Bearer {org2_token}"})
 check("Cancel rejected with 403 Forbidden", res.status_code == 403)
 
-print("\nALL CHECKS PASSED SUCCESSFULLY!")
+print("\n" + "=" * 65)
+print("  ALL CHECKS PASSED SUCCESSFULLY!")
+print("=" * 65)

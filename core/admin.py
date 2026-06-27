@@ -1,8 +1,37 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import User, Interest, Event, Ticket, Payment, Notification, AdminLog
 
-admin.site.register(User, UserAdmin)
+
+class CustomUserAdmin(BaseUserAdmin):
+    # ── Columns shown in the User list page ──────────────────────────────────
+    list_display = ('email', 'username', 'full_name', 'role', 'department', 'faculty', 'is_staff')
+    list_filter  = ('role', 'is_staff', 'is_superuser', 'faculty')
+    search_fields = ('email', 'username', 'first_name', 'last_name', 'department', 'faculty')
+    ordering = ('email',)
+
+    def full_name(self, obj):
+        return obj.get_full_name() or '—'
+    full_name.short_description = 'Full Name'
+
+    # ── Fieldsets shown on the User EDIT page ────────────────────────────────
+    # We extend the default fieldsets tuple by appending our custom section.
+    fieldsets = BaseUserAdmin.fieldsets + (
+        ('Campus Profile', {
+            'fields': ('role', 'department', 'faculty'),
+        }),
+    )
+
+    # ── Fieldsets shown on the Add User page ─────────────────────────────────
+    add_fieldsets = BaseUserAdmin.add_fieldsets + (
+        ('Campus Profile', {
+            'classes': ('wide',),
+            'fields': ('email', 'role', 'department', 'faculty'),
+        }),
+    )
+
+
+admin.site.register(User, CustomUserAdmin)
 admin.site.register(Interest)
 admin.site.register(Event)
 admin.site.register(Ticket)

@@ -93,7 +93,7 @@ class EventSerializer(serializers.ModelSerializer):
         model = Event
         fields = ['id', 'organiser', 'title', 'description', 'category', 'date_time', 
                   'venue', 'capacity', 'event_type', 'ticket_price', 'status', 
-                  'spots_remaining', 'created_at']
+                  'spots_remaining', 'target_faculty', 'target_department', 'created_at']
 
     def get_organiser(self, obj):
         return {
@@ -111,4 +111,5 @@ class EventCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = ['title', 'description', 'category', 'date_time', 
-                  'venue', 'capacity', 'event_type', 'ticket_price']
+                  'venue', 'capacity', 'event_type', 'ticket_price',
+                  'target_faculty', 'target_department']

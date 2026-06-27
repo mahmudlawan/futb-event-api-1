@@ -140,13 +140,18 @@ class RecommendedEventsView(APIView):
 
         def score_event(event):
             score = 0
+            # +2 if event category matches one of the student's interests
             if event.category in user_categories:
                 score += 2
-            if event.organiser.faculty == user_faculty or event.organiser.department == user_dept:
+            # +1 if target_faculty is null/blank (open to all) OR matches student's faculty
+            if not event.target_faculty or event.target_faculty == user_faculty:
+                score += 1
+            # +1 if target_department is null/blank (open to all) OR matches student's department
+            if not event.target_department or event.target_department == user_dept:
                 score += 1
             return score
 
-        # Sort based on score (descending)
+        # Sort based on score (descending), max possible = 4
         ranked_events = sorted(events, key=score_event, reverse=True)
         
         serializer = EventSerializer(ranked_events, many=True)
