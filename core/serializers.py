@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Interest
+from .models import User, Interest, Event
 from django.db import transaction
 
 
@@ -32,10 +32,16 @@ class RegisterSerializer(serializers.ModelSerializer):
         write_only=True
     )
     full_name = serializers.CharField(write_only=True)
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='student')
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with that email already exists.")
+        return value
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'full_name', 'department', 'faculty', 'interests']
+        fields = ['email', 'password', 'full_name', 'department', 'faculty', 'interests', 'role']
 
     @transaction.atomic
     def create(self, validated_data):
@@ -55,7 +61,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             last_name=last_name,
             department=validated_data.get('department', ''),
             faculty=validated_data.get('faculty', ''),
-            role='student',
+            role=validated_data.get('role', 'student'),
             password=validated_data.get('password')
         )
 
@@ -75,3 +81,34 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['role'] = self.user.role
         data['full_name'] = self.user.get_full_name() or self.user.username
         return data
+
+# ─────────────────────────────────────────────
+# Event serializers
+# ─────────────────────────────────────────────
+class EventSerializer(serializers.ModelSerializer):
+    organiser = serializers.SerializerMethodField()
+    spots_remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Event
+        fields = ['id', 'organiser', 'title', 'description', 'category', 'date_time', 
+                  'venue', 'capacity', 'event_type', 'ticket_price', 'status', 
+                  'spots_remaining', 'created_at']
+
+    def get_organiser(self, obj):
+        return {
+            "id": obj.organiser.id,
+            "full_name": obj.organiser.get_full_name() or obj.organiser.username
+        }
+
+    def get_spots_remaining(self, obj):
+        # capacity minus number of active tickets issued so far
+        active_tickets = obj.tickets.filter(status='active').count()
+        return obj.capacity - active_tickets
+
+
+class EventCreateUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Event
+        fields = ['title', 'description', 'category', 'date_time', 
+                  'venue', 'capacity', 'event_type', 'ticket_price']
