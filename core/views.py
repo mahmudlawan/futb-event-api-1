@@ -136,7 +136,7 @@ class RecommendedEventsView(APIView):
         user_dept = user.department
 
         now = timezone.now()
-        events = Event.objects.filter(status='published', date_time__gt=now)
+        events = Event.objects.filter(status='published', date_time__gt=now).order_by('date_time')
 
         def score_event(event):
             score = 0
