@@ -2,7 +2,8 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     RegisterView, CustomTokenObtainPairView, ProfileView, LogoutView,
-    EventListCreateView, EventDetailView, RecommendedEventsView
+    EventListCreateView, EventDetailView, RecommendedEventsView,
+    FreeEventRegisterView, MyTicketsView, InitiatePaymentView, VerifyPaymentView
 )
 
 urlpatterns = [
@@ -15,4 +16,9 @@ urlpatterns = [
     path('events/', EventListCreateView.as_view(), name='event-list-create'),
     path('events/recommended/', RecommendedEventsView.as_view(), name='event-recommended'),
     path('events/<int:pk>/', EventDetailView.as_view(), name='event-detail'),
+    path('events/<int:pk>/register/', FreeEventRegisterView.as_view(), name='free-event-register'),
+    path('events/<int:pk>/pay/', InitiatePaymentView.as_view(), name='initiate-payment'),
+    
+    path('tickets/my/', MyTicketsView.as_view(), name='my-tickets'),
+    path('payments/verify/<str:reference>/', VerifyPaymentView.as_view(), name='verify-payment'),
 ]

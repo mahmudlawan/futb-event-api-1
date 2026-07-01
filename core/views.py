@@ -4,11 +4,16 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer
+from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer
 from .permissions import IsOrganiser, IsAdminRole
-from .models import Event
+from .models import Event, Ticket, Payment
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
+from django.db import transaction
+from django.core.signing import Signer
+import secrets
+import requests
 # POST /api/auth/register/
 class RegisterView(APIView):
     permission_classes = [AllowAny]
@@ -156,3 +161,184 @@ class RecommendedEventsView(APIView):
         
         serializer = EventSerializer(ranked_events, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────
+# PART A — FREE REGISTRATION & TICKETS
+# ─────────────────────────────────────────────
+
+class FreeEventRegisterView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if request.user.role != 'student':
+            return Response({"detail": "Only students can register for events."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            event = Event.objects.get(pk=pk)
+        except Event.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if event.event_type != "free":
+            return Response({"detail": "This is a paid event, use the payment endpoint instead."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Duplicate Check
+        if event.tickets.filter(user=request.user, status='active').exists():
+            return Response({"detail": "You have already registered for this event."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Capacity Check
+        active_count = event.tickets.filter(status='active').count()
+        if active_count >= event.capacity:
+            return Response({"detail": "Event is fully booked."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Atomic creation + cryptographic signing of ticket QR
+        with transaction.atomic():
+            ticket = Ticket.objects.create(
+                user=request.user,
+                event=event,
+                qr_code_hash=secrets.token_hex(16),  # temporary unique placeholder
+                ticket_type="free",
+                status="active"
+            )
+            # Combine the ticket id + a cryptographically secure token and sign it
+            signer = Signer()
+            ticket.qr_code_hash = signer.sign(f"{ticket.id}:{secrets.token_hex(8)}")
+            ticket.save()
+
+        serializer = TicketSerializer(ticket)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class MyTicketsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        tickets = Ticket.objects.filter(user=request.user)
+        serializer = TicketSerializer(tickets, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────
+# PART B — PAYSTACK INTEGRATION (SANDBOX)
+# ─────────────────────────────────────────────
+
+class InitiatePaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if request.user.role != 'student':
+            return Response({"detail": "Only students can register for events."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            event = Event.objects.get(pk=pk)
+        except Event.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if event.event_type != "paid":
+            return Response({"detail": "This is a free event, use the register endpoint instead."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Duplicate Check
+        if event.tickets.filter(user=request.user, status='active').exists():
+            return Response({"detail": "You have already registered for this event."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Capacity Check
+        active_count = event.tickets.filter(status='active').count()
+        if active_count >= event.capacity:
+            return Response({"detail": "Event is fully booked."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Call Paystack Transaction Initialize
+        url = "https://api.paystack.co/transaction/initialize"
+        headers = {
+            "Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+        # Ticket price in kobo (Paystack expected lowest currency unit)
+        amount_in_kobo = int(event.ticket_price * 100)
+        data = {
+            "email": request.user.email,
+            "amount": amount_in_kobo,
+        }
+
+        try:
+            res = requests.post(url, json=data, headers=headers, timeout=10)
+            res_data = res.json()
+            if not res_data.get("status"):
+                return Response({"detail": f"Paystack initiation failed: {res_data.get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            paystack_ref = res_data["data"]["reference"]
+            authorization_url = res_data["data"]["authorization_url"]
+
+            # Save pending payment
+            Payment.objects.create(
+                user=request.user,
+                event=event,
+                amount=event.ticket_price,
+                paystack_ref=paystack_ref,
+                status="pending"
+            )
+
+            return Response({
+                "authorization_url": authorization_url,
+                "reference": paystack_ref
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": f"Payment server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VerifyPaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, reference):
+        try:
+            payment = Payment.objects.get(paystack_ref=reference)
+        except Payment.DoesNotExist:
+            return Response({"detail": "Payment record not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Idempotency check: If reference is already verified, return existing ticket
+        if payment.status == "success" and payment.ticket:
+            return Response(TicketSerializer(payment.ticket).data, status=status.HTTP_200_OK)
+
+        # Call Paystack Transaction Verify
+        url = f"https://api.paystack.co/transaction/verify/{reference}"
+        headers = {
+            "Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}",
+        }
+
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            res_data = res.json()
+            if not res_data.get("status"):
+                return Response({"detail": f"Paystack verification failed: {res_data.get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            paystack_status = res_data["data"]["status"]
+
+            if paystack_status == "success":
+                with transaction.atomic():
+                    # Generate cryptographically signed paid ticket
+                    ticket = Ticket.objects.create(
+                        user=payment.user,
+                        event=payment.event,
+                        qr_code_hash=secrets.token_hex(16),
+                        ticket_type="paid",
+                        status="active"
+                    )
+                    signer = Signer()
+                    ticket.qr_code_hash = signer.sign(f"{ticket.id}:{secrets.token_hex(8)}")
+                    ticket.save()
+
+                    # Save verified status
+                    payment.status = "success"
+                    payment.ticket = ticket
+                    payment.paid_at = timezone.now()
+                    payment.save()
+
+                return Response(TicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
+            else:
+                # Update status (e.g. failed / abandoned)
+                payment.status = paystack_status
+                payment.save()
+                return Response({"detail": f"Payment not successful. Status: {paystack_status}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({"detail": f"Payment verification server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

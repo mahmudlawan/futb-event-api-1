@@ -59,7 +59,8 @@ class Ticket(models.Model):
     scanned_at = models.DateTimeField(null=True, blank=True)
 
 class Payment(models.Model):
-    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='payments')
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True, related_name='payments')
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, null=True, blank=True, related_name='payments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default='NGN')

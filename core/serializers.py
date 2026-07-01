@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Interest, Event
+from .models import User, Interest, Event, Ticket
 from django.db import transaction
+import qrcode
+import io
+import base64
 
 
 # ─────────────────────────────────────────────
@@ -113,3 +116,38 @@ class EventCreateUpdateSerializer(serializers.ModelSerializer):
         fields = ['title', 'description', 'category', 'date_time', 
                   'venue', 'capacity', 'event_type', 'ticket_price',
                   'target_faculty', 'target_department']
+
+
+# ─────────────────────────────────────────────
+# Ticket serializers
+# ─────────────────────────────────────────────
+class TicketSerializer(serializers.ModelSerializer):
+    event = serializers.SerializerMethodField()
+    qr_code_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Ticket
+        fields = ['id', 'event', 'ticket_type', 'status', 'issued_at', 'qr_code_image']
+
+    def get_event(self, obj):
+        return {
+            "title": obj.event.title,
+            "date_time": obj.event.date_time,
+            "venue": obj.event.venue,
+        }
+
+    def get_qr_code_image(self, obj):
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(obj.qr_code_hash)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{img_str}"
