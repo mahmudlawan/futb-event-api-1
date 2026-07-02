@@ -5,9 +5,9 @@ from .models import User, Interest, Event, Ticket, Payment, Notification, AdminL
 
 class CustomUserAdmin(BaseUserAdmin):
     # ── Columns shown in the User list page ──────────────────────────────────
-    list_display = ('email', 'username', 'full_name', 'role', 'department', 'faculty', 'is_staff')
+    list_display = ('email', 'username', 'full_name', 'role', 'department', 'faculty', 'fcm_token', 'is_staff')
     list_filter  = ('role', 'is_staff', 'is_superuser', 'faculty')
-    search_fields = ('email', 'username', 'first_name', 'last_name', 'department', 'faculty')
+    search_fields = ('email', 'username', 'first_name', 'last_name', 'department', 'faculty', 'fcm_token')
     ordering = ('email',)
 
     def full_name(self, obj):
@@ -18,7 +18,7 @@ class CustomUserAdmin(BaseUserAdmin):
     # We extend the default fieldsets tuple by appending our custom section.
     fieldsets = BaseUserAdmin.fieldsets + (
         ('Campus Profile', {
-            'fields': ('role', 'department', 'faculty'),
+            'fields': ('role', 'department', 'faculty', 'fcm_token'),
         }),
     )
 
