@@ -13,6 +13,7 @@ class User(AbstractUser):
     department = models.CharField(max_length=100, blank=True, null=True)
     faculty = models.CharField(max_length=100, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
+    fcm_token = models.CharField(max_length=255, blank=True, null=True)
 
 class Interest(models.Model):
     CATEGORY_CHOICES = (

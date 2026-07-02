@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer
+from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer
 from .permissions import IsOrganiser, IsAdminRole
 from .models import Event, Ticket, Payment
 from django.utils import timezone
@@ -342,3 +342,25 @@ class VerifyPaymentView(APIView):
 
         except Exception as e:
             return Response({"detail": f"Payment verification server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class FCMTokenUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        serializer = FCMTokenSerializer(data=request.data)
+        if serializer.is_valid():
+            request.user.fcm_token = serializer.validated_data['fcm_token']
+            request.user.save()
+            return Response({"detail": "FCM token updated successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class TestReminderView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        from core.tasks import send_event_reminders
+        try:
+            send_event_reminders()
+            return Response({"detail": "Successfully triggered send_event_reminders task."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": f"Error running reminders: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

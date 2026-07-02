@@ -151,3 +151,9 @@ class TicketSerializer(serializers.ModelSerializer):
         img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         return f"data:image/png;base64,{img_str}"
+
+# ─────────────────────────────────────────────
+# FCM Token Serializer
+# ─────────────────────────────────────────────
+class FCMTokenSerializer(serializers.Serializer):
+    fcm_token = serializers.CharField(max_length=255)
