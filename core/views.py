@@ -364,3 +364,49 @@ class TestReminderView(APIView):
             return Response({"detail": "Successfully triggered send_event_reminders task."}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": f"Error running reminders: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ValidateTicketView(APIView):
+    permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]
+
+    def post(self, request):
+        qr_code_hash = request.data.get("qr_code_hash")
+        if not qr_code_hash:
+            return Response({"detail": "qr_code_hash is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                ticket = Ticket.objects.select_for_update().get(qr_code_hash=qr_code_hash)
+                
+                if ticket.status == "used":
+                    return Response({
+                        "status": "ALREADY_USED",
+                        "message": "This ticket has already been scanned. Entry denied.",
+                        "scanned_at": ticket.scanned_at
+                    }, status=status.HTTP_200_OK)
+                    
+                elif ticket.status == "cancelled":
+                    return Response({
+                        "status": "CANCELLED",
+                        "message": "This ticket has been cancelled. Entry denied."
+                    }, status=status.HTTP_200_OK)
+                    
+                elif ticket.status == "active":
+                    ticket.status = "used"
+                    ticket.scanned_at = timezone.now()
+                    ticket.save()
+                    
+                    attendee_name = ticket.user.get_full_name() or ticket.user.username
+                    
+                    return Response({
+                        "status": "VALID",
+                        "message": "Ticket valid. Entry granted.",
+                        "attendee_name": attendee_name,
+                        "event_title": ticket.event.title,
+                        "ticket_type": ticket.ticket_type
+                      }, status=status.HTTP_200_OK)
+                      
+        except Ticket.DoesNotExist:
+            return Response({
+                "status": "INVALID",
+                "message": "Ticket not recognised. Entry denied."
+            }, status=status.HTTP_200_OK)
