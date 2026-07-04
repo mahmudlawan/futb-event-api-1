@@ -4,7 +4,8 @@ from .views import (
     RegisterView, CustomTokenObtainPairView, ProfileView, LogoutView,
     EventListCreateView, EventDetailView, RecommendedEventsView,
     FreeEventRegisterView, MyTicketsView, InitiatePaymentView, VerifyPaymentView,
-    FCMTokenUpdateView, TestReminderView, ValidateTicketView
+    FCMTokenUpdateView, TestReminderView, ValidateTicketView,
+    DashboardView, EventAttendanceView
 )
 
 urlpatterns = [
@@ -26,4 +27,7 @@ urlpatterns = [
     path('payments/verify/<str:reference>/', VerifyPaymentView.as_view(), name='verify-payment'),
     
     path('notifications/test-reminder/', TestReminderView.as_view(), name='test-reminder'),
+    
+    path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('dashboard/events/<int:id>/attendance/', EventAttendanceView.as_view(), name='event-attendance'),
 ]

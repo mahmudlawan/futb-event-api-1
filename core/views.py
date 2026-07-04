@@ -6,9 +6,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer
 from .permissions import IsOrganiser, IsAdminRole
-from .models import Event, Ticket, Payment
+from .models import User, Event, Ticket, Payment, Notification
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.conf import settings
 from django.db import transaction
 from django.core.signing import Signer
@@ -410,3 +410,110 @@ class ValidateTicketView(APIView):
                 "status": "INVALID",
                 "message": "Ticket not recognised. Entry denied."
             }, status=status.HTTP_200_OK)
+
+class DashboardView(APIView):
+    permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]
+
+    def get(self, request):
+        response_data = {}
+        
+        # 1. Overview (For Super Admin only)
+        if request.user.role == 'admin':
+            total_events = Event.objects.filter(status='published').count()
+            total_students = User.objects.filter(role='student').count()
+            total_tickets_issued = Ticket.objects.filter(status__in=['active', 'used']).count()
+            
+            rev_agg = Payment.objects.filter(status='success').aggregate(total=Sum('amount'))
+            total_revenue = float(rev_agg['total'] or 0.00)
+            
+            response_data['overview'] = {
+                "total_events": total_events,
+                "total_students": total_students,
+                "total_tickets_issued": total_tickets_issued,
+                "total_revenue": total_revenue
+            }
+            
+            # recent notifications (last 10 across the platform)
+            notifications = Notification.objects.select_related('user', 'event').order_by('-id')[:10]
+            recent_notifications = []
+            for n in notifications:
+                recent_notifications.append({
+                    "user_email": n.user.email,
+                    "event_title": n.event.title if n.event else None,
+                    "type": n.type,
+                    "status": n.status,
+                    "sent_at": n.sent_at.isoformat() if n.sent_at else None
+                })
+            response_data['recent_notifications'] = recent_notifications
+            
+        # 2. My Events (For Organiser / Admin can also view their owned ones)
+        my_events_list = []
+        my_events_qs = Event.objects.filter(organiser=request.user)
+        for event in my_events_qs:
+            tickets_issued = event.tickets.filter(status__in=['active', 'used']).count()
+            tickets_used = event.tickets.filter(status='used').count()
+            spots_remaining = event.capacity - tickets_issued
+            
+            rev_agg = event.payments.filter(status='success').aggregate(total=Sum('amount'))
+            revenue = float(rev_agg['total'] or 0.00)
+            
+            attendance_rate = round((tickets_used / event.capacity) * 100, 1) if event.capacity > 0 else 0.0
+            
+            my_events_list.append({
+                "id": event.id,
+                "title": event.title,
+                "date_time": event.date_time.isoformat(),
+                "venue": event.venue,
+                "capacity": event.capacity,
+                "tickets_issued": tickets_issued,
+                "tickets_used": tickets_used,
+                "spots_remaining": spots_remaining,
+                "revenue": revenue,
+                "attendance_rate": attendance_rate
+            })
+            
+        response_data['my_events'] = my_events_list
+        return Response(response_data, status=status.HTTP_200_OK)
+
+class EventAttendanceView(APIView):
+    permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]
+
+    def get(self, request, id):
+        try:
+            event = Event.objects.get(pk=id)
+        except Event.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Restrict organisers to only their own events
+        if request.user.role == 'organiser' and event.organiser != request.user:
+            return Response({"detail": "You do not have permission to view this event's attendance."}, status=status.HTTP_403_FORBIDDEN)
+
+        tickets_issued = event.tickets.filter(status__in=['active', 'used']).count()
+        tickets_used = event.tickets.filter(status='used').count()
+        spots_remaining = event.capacity - tickets_issued
+        attendance_rate = round((tickets_used / event.capacity) * 100, 1) if event.capacity > 0 else 0.0
+
+        attendees = []
+        tickets_qs = event.tickets.select_related('user').all()
+        for t in tickets_qs:
+            attendees.append({
+                "full_name": t.user.get_full_name() or t.user.username,
+                "email": t.user.email,
+                "ticket_type": t.ticket_type,
+                "status": t.status,
+                "issued_at": t.issued_at.isoformat() if t.issued_at else None,
+                "scanned_at": t.scanned_at.isoformat() if t.scanned_at else None
+            })
+
+        response_data = {
+            "event_title": event.title,
+            "date_time": event.date_time.isoformat(),
+            "venue": event.venue,
+            "capacity": event.capacity,
+            "tickets_issued": tickets_issued,
+            "tickets_used": tickets_used,
+            "spots_remaining": spots_remaining,
+            "attendance_rate": attendance_rate,
+            "attendees": attendees
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
