@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer
+from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer, NotificationSerializer
 from .permissions import IsOrganiser, IsAdminRole
 from .models import User, Event, Ticket, Payment, Notification
 from django.utils import timezone
@@ -517,3 +517,21 @@ class EventAttendanceView(APIView):
             "attendees": attendees
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/notifications/
+# Returns the authenticated user's notifications, newest first.
+# ─────────────────────────────────────────────────────────────────────────────
+class NotificationListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        notifications = (
+            Notification.objects
+            .filter(user=request.user)
+            .select_related('event')
+            .order_by('-id')
+        )
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

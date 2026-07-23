@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Interest, Event, Ticket
+from .models import User, Interest, Event, Ticket, Notification
 from django.db import transaction
 import qrcode
 import io
@@ -157,3 +157,25 @@ class TicketSerializer(serializers.ModelSerializer):
 # ─────────────────────────────────────────────
 class FCMTokenSerializer(serializers.Serializer):
     fcm_token = serializers.CharField(max_length=255)
+
+
+# ─────────────────────────────────────────────
+# Notification serializer
+# ─────────────────────────────────────────────
+class NotificationSerializer(serializers.ModelSerializer):
+    event = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = ['id', 'event', 'type', 'message', 'scheduled_time', 'sent_at', 'status']
+
+    def get_event(self, obj):
+        if obj.event:
+            return {
+                "id": obj.event.id,
+                "title": obj.event.title,
+                "date_time": obj.event.date_time,
+                "venue": obj.event.venue,
+            }
+        return None
+
