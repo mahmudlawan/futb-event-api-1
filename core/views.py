@@ -61,7 +61,8 @@ class EventListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        events = Event.objects.filter(status='published')
+        now = timezone.now()
+        events = Event.objects.filter(status='published', date_time__gt=now).order_by('date_time')
         
         category = request.query_params.get('category')
         faculty = request.query_params.get('faculty')
@@ -76,6 +77,7 @@ class EventListCreateView(APIView):
             
         serializer = EventSerializer(events, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
     def post(self, request):
         if request.user.role not in ['organiser', 'admin']:
