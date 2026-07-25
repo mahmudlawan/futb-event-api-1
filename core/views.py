@@ -471,7 +471,9 @@ class DashboardView(APIView):
                 "tickets_used": tickets_used,
                 "spots_remaining": spots_remaining,
                 "revenue": revenue,
-                "attendance_rate": attendance_rate
+                "attendance_rate": attendance_rate,
+                "event_type": event.event_type,
+                "status": event.status,
             })
             
         response_data['my_events'] = my_events_list
@@ -508,6 +510,12 @@ class EventAttendanceView(APIView):
             })
 
         response_data = {
+            "event": {
+                "title": event.title,
+                "date_time": event.date_time.isoformat(),
+                "venue": event.venue,
+                "capacity": event.capacity
+            },
             "event_title": event.title,
             "date_time": event.date_time.isoformat(),
             "venue": event.venue,
