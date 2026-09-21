@@ -2,6 +2,8 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     RegisterView, CustomTokenObtainPairView, ProfileView, LogoutView,
+    ProfileUpdateView, ChangePasswordView,
+    RequestPasswordResetView, VerifyOTPView, ResetPasswordView,
     EventListCreateView, EventDetailView, RecommendedEventsView,
     FreeEventRegisterView, MyTicketsView, InitiatePaymentView, VerifyPaymentView,
     FCMTokenUpdateView, TestReminderView, ValidateTicketView,
@@ -14,6 +16,11 @@ urlpatterns = [
     path('auth/login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', ProfileView.as_view(), name='profile'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
+    path('auth/profile/update/', ProfileUpdateView.as_view(), name='profile-update'),
+    path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
+    path('auth/forgot-password/', RequestPasswordResetView.as_view(), name='forgot-password'),
+    path('auth/verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     path('auth/fcm-token/', FCMTokenUpdateView.as_view(), name='fcm-token'),
     
     path('events/', EventListCreateView.as_view(), name='event-list-create'),

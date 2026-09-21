@@ -14,6 +14,8 @@ class User(AbstractUser):
     faculty = models.CharField(max_length=100, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
     fcm_token = models.CharField(max_length=255, blank=True, null=True)
+    password_reset_otp = models.CharField(max_length=64, blank=True, null=True)
+    password_reset_otp_expires = models.DateTimeField(blank=True, null=True)
 
 class Interest(models.Model):
     CATEGORY_CHOICES = (
@@ -27,20 +29,31 @@ class Interest(models.Model):
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
 
 class Event(models.Model):
-    EVENT_TYPE_CHOICES = (
+    CATEGORY_CHOICES = [
+        ('academic',   'Academic'),
+        ('cultural',   'Cultural'),
+        ('sports',     'Sports'),
+        ('social',     'Social'),
+        ('technology', 'Technology'),
+    ]
+    EVENT_TYPE_CHOICES = [
         ('free', 'Free'),
         ('paid', 'Paid'),
-    )
+    ]
+    STATUS_CHOICES = [
+        ('published', 'Published'),
+        ('cancelled', 'Cancelled'),
+    ]
     organiser = models.ForeignKey(User, on_delete=models.CASCADE, related_name='events_organised')
     title = models.CharField(max_length=200)
     description = models.TextField()
-    category = models.CharField(max_length=50)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
     date_time = models.DateTimeField()
     venue = models.CharField(max_length=200)
     capacity = models.PositiveIntegerField()
     event_type = models.CharField(max_length=10, choices=EVENT_TYPE_CHOICES, default='free')
     ticket_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    status = models.CharField(max_length=20, default='upcoming')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='published')
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     target_faculty = models.CharField(max_length=100, blank=True, null=True)
     target_department = models.CharField(max_length=100, blank=True, null=True)

@@ -4,10 +4,11 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer, NotificationSerializer
+from .serializers import RegisterSerializer, UserSerializer, CustomTokenObtainPairSerializer, EventSerializer, EventCreateUpdateSerializer, TicketSerializer, FCMTokenSerializer, NotificationSerializer, ProfileUpdateSerializer, ChangePasswordSerializer
 from .permissions import IsOrganiser, IsAdminRole
 from .models import User, Event, Ticket, Payment, Notification
 from django.utils import timezone
+from datetime import timedelta
 from django.db.models import Q, Sum
 from django.conf import settings
 from django.db import transaction
@@ -53,6 +54,140 @@ class LogoutView(APIView):
             return Response({"detail": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
         except Exception:
             return Response({"detail": "Invalid or missing refresh token."}, status=status.HTTP_400_BAD_REQUEST)
+# POST /api/auth/profile/update/ – update user profile (PATCH)
+class ProfileUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        serializer = ProfileUpdateSerializer(data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            user = serializer.update_user(request.user, serializer.validated_data)
+            return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# POST /api/auth/change-password/ – change password (POST)
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"detail": "Password changed successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+import random
+import string
+from django.core.mail import send_mail
+
+# POST /api/auth/forgot-password/
+class RequestPasswordResetView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(email=email)
+            otp = ''.join(random.choices(string.digits, k=6))
+            expires = timezone.now() + timedelta(minutes=10)
+            
+            user.password_reset_otp = otp
+            user.password_reset_otp_expires = expires
+            user.save()
+            
+            send_mail(
+                subject='FUTB Smart Campus — Password Reset Code',
+                message=f'''Hello {user.first_name or user.email},
+
+Your password reset code is:
+
+{otp}
+
+This code expires in 10 minutes.
+
+If you did not request a password reset, please ignore this email.
+
+FUTB Smart Campus Team''',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except User.DoesNotExist:
+            pass # DO nothing, but still return success for security
+        except Exception as e:
+            return Response({"error": "Failed to send reset email. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"message": "If this email is registered, a reset code has been sent."}, status=status.HTTP_200_OK)
+
+# POST /api/auth/verify-otp/
+class VerifyOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        otp = request.data.get("otp")
+
+        if not email or not otp:
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.password_reset_otp != otp:
+            return Response({"error": "Invalid verification code"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.password_reset_otp_expires or timezone.now() > user.password_reset_otp_expires:
+            return Response({"error": "Verification code has expired. Please request a new one."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reset_token = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+        user.password_reset_otp = reset_token
+        user.password_reset_otp_expires = timezone.now() + timedelta(minutes=5)
+        user.save()
+
+        return Response({
+            "message": "Code verified successfully",
+            "reset_token": reset_token,
+            "email": email
+        }, status=status.HTTP_200_OK)
+
+# POST /api/auth/reset-password/
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        reset_token = request.data.get("reset_token")
+        new_password = request.data.get("new_password")
+
+        if not email or not reset_token or not new_password:
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.password_reset_otp != reset_token:
+            return Response({"error": "Invalid or expired reset token"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.password_reset_otp_expires or timezone.now() > user.password_reset_otp_expires:
+            return Response({"error": "Reset token has expired. Please start again."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 8:
+            return Response({"error": "Password must be at least 8 characters"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.password_reset_otp = None
+        user.password_reset_otp_expires = None
+        user.save()
+
+        return Response({"message": "Password reset successful. You can now log in with your new password."}, status=status.HTTP_200_OK)
+
 
 # ─────────────────────────────────────────────
 # Event Views
@@ -524,7 +659,12 @@ class EventAttendanceView(APIView):
             "tickets_used": tickets_used,
             "spots_remaining": spots_remaining,
             "attendance_rate": attendance_rate,
-            "attendees": attendees
+            "attendees": attendees,
+            "reminder_summary": {
+                "twenty_four_h": Notification.objects.filter(event=event, status='sent', sent_at__range=(event.date_time - timedelta(hours=24), event.date_time)).count(),
+                "twelve_h": Notification.objects.filter(event=event, status='sent', sent_at__range=(event.date_time - timedelta(hours=12), event.date_time)).count(),
+                "two_h": Notification.objects.filter(event=event, status='sent', sent_at__range=(event.date_time - timedelta(hours=2), event.date_time)).count()
+            }
         }
         return Response(response_data, status=status.HTTP_200_OK)
 
