@@ -13,8 +13,10 @@ from django.db.models import Q, Sum
 from django.conf import settings
 from django.db import transaction
 from django.core.signing import Signer
+import os
 import secrets
 import requests
+from rest_framework.parsers import MultiPartParser, FormParser
 # POST /api/auth/register/
 class RegisterView(APIView):
     permission_classes = [AllowAny]
@@ -38,7 +40,7 @@ class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = UserSerializer(request.user)
+        serializer = UserSerializer(request.user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -62,8 +64,63 @@ class ProfileUpdateView(APIView):
         serializer = ProfileUpdateSerializer(data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             user = serializer.update_user(request.user, serializer.validated_data)
-            return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+            return Response(UserSerializer(user, context={'request': request}).data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# PATCH /api/auth/profile/picture/ – upload profile picture
+class ProfilePictureUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def patch(self, request):
+        user = request.user
+
+        if 'profile_picture' not in request.FILES:
+            return Response(
+                {'error': 'No image file provided'},
+                status=400
+            )
+
+        image_file = request.FILES['profile_picture']
+
+        # Validate file type
+        allowed_types = [
+            'image/jpeg',
+            'image/png',
+            'image/jpg'
+        ]
+        if image_file.content_type not in allowed_types:
+            return Response(
+                {'error': 'Only JPEG and PNG images are allowed'},
+                status=400
+            )
+
+        # Validate file size (max 5MB)
+        if image_file.size > 5 * 1024 * 1024:
+            return Response(
+                {'error': 'Image must be smaller than 5MB'},
+                status=400
+            )
+
+        # Delete old picture if exists
+        if user.profile_picture:
+            try:
+                if os.path.isfile(user.profile_picture.path):
+                    os.remove(user.profile_picture.path)
+            except Exception:
+                pass
+
+        # Save new picture
+        user.profile_picture = image_file
+        user.save()
+
+        serializer = UserSerializer(
+            user,
+            context={'request': request}
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 
 # POST /api/auth/change-password/ – change password (POST)
 class ChangePasswordView(APIView):

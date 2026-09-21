@@ -16,6 +16,11 @@ class User(AbstractUser):
     fcm_token = models.CharField(max_length=255, blank=True, null=True)
     password_reset_otp = models.CharField(max_length=64, blank=True, null=True)
     password_reset_otp_expires = models.DateTimeField(blank=True, null=True)
+    profile_picture = models.ImageField(
+        upload_to='profile_pictures/',
+        blank=True,
+        null=True,
+    )
 
 class Interest(models.Model):
     CATEGORY_CHOICES = (

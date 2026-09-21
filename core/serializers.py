@@ -13,16 +13,25 @@ import base64
 class UserSerializer(serializers.ModelSerializer):
     interests = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
+    profile_picture_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'department', 'faculty', 'role', 'interests']
+        fields = ['id', 'email', 'full_name', 'department', 'faculty', 'role', 'interests', 'profile_picture_url']
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
 
     def get_interests(self, obj):
         return [interest.category for interest in obj.interests.all()]
+
+    def get_profile_picture_url(self, obj):
+        if obj.profile_picture:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_picture.url)
+            return obj.profile_picture.url
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -179,3 +188,58 @@ class NotificationSerializer(serializers.ModelSerializer):
             }
         return None
 
+# ─────────────────────────────────────────────
+# Profile update serializer
+# ─────────────────────────────────────────────
+class ProfileUpdateSerializer(serializers.Serializer):
+    full_name = serializers.CharField(required=False, max_length=255)
+    department = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    faculty = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    interests = serializers.ListField(
+        child=serializers.ChoiceField(choices=Interest.CATEGORY_CHOICES),
+        required=False,
+        allow_empty=True,
+    )
+
+    def update_user(self, user, validated_data):
+        # Update name
+        full_name = validated_data.get('full_name')
+        if full_name:
+            parts = full_name.split(' ', 1)
+            user.first_name = parts[0]
+            user.last_name = parts[1] if len(parts) > 1 else ''
+        # Update department/faculty
+        if 'department' in validated_data:
+            user.department = validated_data['department']
+        if 'faculty' in validated_data:
+            user.faculty = validated_data['faculty']
+        # Update interests – replace existing
+        if 'interests' in validated_data:
+            user.interests.all().delete()
+            for cat in validated_data['interests']:
+                Interest.objects.create(user=user, category=cat)
+        user.save()
+        return user
+
+# ─────────────────────────────────────────────
+# Change password serializer
+# ─────────────────────────────────────────────
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_current_password(self, value):
+        request = self.context.get('request')
+        if not request:
+            raise serializers.ValidationError('Request context is required.')
+        if not request.user.check_password(value):
+            raise serializers.ValidationError('Current password is incorrect.')
+        return value
+
+    def save(self, **kwargs):
+        request = self.context['request']
+        user = request.user
+        new_password = self.validated_data['new_password']
+        user.set_password(new_password)
+        user.save()
+        return user
