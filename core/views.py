@@ -9,7 +9,7 @@ from .permissions import IsOrganiser, IsAdminRole
 from .models import User, Event, Ticket, Payment, Notification
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, Count
 from django.conf import settings
 from django.db import transaction
 from django.core.signing import Signer
@@ -613,20 +613,125 @@ class DashboardView(APIView):
         
         # 1. Overview (For Super Admin only)
         if request.user.role == 'admin':
+            now = timezone.now()
+            thirty_days_ago = now - timedelta(days=30)
+            seven_days_ago = now - timedelta(days=7)
+
+            # ── Core stats ──
             total_events = Event.objects.filter(status='published').count()
             total_students = User.objects.filter(role='student').count()
-            total_tickets_issued = Ticket.objects.filter(status__in=['active', 'used']).count()
-            
+            total_organisers = User.objects.filter(role='organiser').count()
+            total_tickets = Ticket.objects.filter(status__in=['active', 'used']).count()
+            total_tickets_used = Ticket.objects.filter(status='used').count()
+
             rev_agg = Payment.objects.filter(status='success').aggregate(total=Sum('amount'))
             total_revenue = float(rev_agg['total'] or 0.00)
-            
+
+            # ── Attendance rate ──
+            capacity_agg = Event.objects.filter(status='published').aggregate(total=Sum('capacity'))
+            total_capacity = capacity_agg['total'] or 1
+            overall_attendance_rate = round((total_tickets_used / total_capacity) * 100, 1)
+
+            # ── Recent activity (last 30 days) ──
+            new_students_30d = User.objects.filter(
+                role='student',
+                date_joined__gte=thirty_days_ago
+            ).count()
+
+            new_tickets_30d = Ticket.objects.filter(
+                status__in=['active', 'used'],
+                issued_at__gte=thirty_days_ago
+            ).count()
+
+            new_events_30d = Event.objects.filter(
+                status='published',
+                created_at__gte=thirty_days_ago
+            ).count()
+
+            revenue_30d = float(
+                Payment.objects.filter(
+                    status='success',
+                    paid_at__gte=thirty_days_ago
+                ).aggregate(total=Sum('amount'))['total'] or 0.00
+            )
+
+            # ── Category breakdown ──
+            category_stats = []
+            categories = ['academic', 'cultural', 'sports', 'social', 'technology']
+            for cat in categories:
+                event_count = Event.objects.filter(category=cat, status='published').count()
+                ticket_count = Ticket.objects.filter(
+                    event__category=cat,
+                    status__in=['active', 'used']
+                ).count()
+                category_stats.append({
+                    'category': cat,
+                    'events': event_count,
+                    'tickets': ticket_count,
+                })
+
+            # ── Top 5 events by attendance ──
+            top_events = Event.objects.filter(status='published').annotate(
+                ticket_count=Count(
+                    'tickets',
+                    filter=Q(tickets__status__in=['active', 'used'])
+                )
+            ).order_by('-ticket_count')[:5]
+
+            top_events_data = [
+                {
+                    'id': e.id,
+                    'title': e.title,
+                    'category': e.category,
+                    'tickets_issued': e.ticket_count,
+                    'capacity': e.capacity,
+                    'attendance_rate': round(
+                        (e.ticket_count / e.capacity) * 100 if e.capacity > 0 else 0.0,
+                        1
+                    ),
+                    'event_type': e.event_type,
+                }
+                for e in top_events
+            ]
+
+            # ── Weekly ticket registrations (last 7 days) ──
+            weekly_data = []
+            for i in range(6, -1, -1):
+                day = now - timedelta(days=i)
+                day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+                day_end = day.replace(hour=23, minute=59, second=59, microsecond=999999)
+                count = Ticket.objects.filter(
+                    issued_at__gte=day_start,
+                    issued_at__lte=day_end,
+                    status__in=['active', 'used']
+                ).count()
+                weekly_data.append({
+                    'day': day.strftime('%a'),
+                    'tickets': count,
+                })
+
             response_data['overview'] = {
-                "total_events": total_events,
-                "total_students": total_students,
-                "total_tickets_issued": total_tickets_issued,
-                "total_revenue": total_revenue
+                # Core stats
+                'total_events': total_events,
+                'total_students': total_students,
+                'total_organisers': total_organisers,
+                'total_tickets_issued': total_tickets,
+                'total_tickets_used': total_tickets_used,
+                'total_revenue': total_revenue,
+                'overall_attendance_rate': overall_attendance_rate,
+
+                # Last 30 days
+                'new_students_30d': new_students_30d,
+                'new_tickets_30d': new_tickets_30d,
+                'new_events_30d': new_events_30d,
+                'revenue_30d': revenue_30d,
+
+                # Analytics
+                'category_breakdown': category_stats,
+                'top_events': top_events_data,
+                'weekly_registrations': weekly_data,
             }
-            
+
             # recent notifications (last 10 across the platform)
             notifications = Notification.objects.select_related('user', 'event').order_by('-id')[:10]
             recent_notifications = []
@@ -639,7 +744,7 @@ class DashboardView(APIView):
                     "sent_at": n.sent_at.isoformat() if n.sent_at else None
                 })
             response_data['recent_notifications'] = recent_notifications
-            
+
         # 2. My Events (For Organiser / Admin can also view their owned ones)
         my_events_list = []
         my_events_qs = Event.objects.filter(organiser=request.user)
@@ -647,12 +752,12 @@ class DashboardView(APIView):
             tickets_issued = event.tickets.filter(status__in=['active', 'used']).count()
             tickets_used = event.tickets.filter(status='used').count()
             spots_remaining = event.capacity - tickets_issued
-            
+
             rev_agg = event.payments.filter(status='success').aggregate(total=Sum('amount'))
             revenue = float(rev_agg['total'] or 0.00)
-            
+
             attendance_rate = round((tickets_used / event.capacity) * 100, 1) if event.capacity > 0 else 0.0
-            
+
             my_events_list.append({
                 "id": event.id,
                 "title": event.title,
@@ -667,9 +772,78 @@ class DashboardView(APIView):
                 "event_type": event.event_type,
                 "status": event.status,
             })
-            
+
         response_data['my_events'] = my_events_list
+
+        # Summary stats for organiser
+        organiser_total_tickets = Ticket.objects.filter(
+            event__organiser=request.user,
+            status__in=['active', 'used']
+        ).count()
+
+        organiser_revenue = float(
+            Payment.objects.filter(
+                ticket__event__organiser=request.user,
+                status='success'
+            ).aggregate(total=Sum('amount'))['total'] or 0.00
+        )
+
+        organiser_total_events = Event.objects.filter(
+            organiser=request.user,
+            status='published'
+        ).count()
+
+        response_data['organiser_summary'] = {
+            'total_events': organiser_total_events,
+            'total_tickets': organiser_total_tickets,
+            'total_revenue': organiser_revenue,
+        }
+
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class AllUsersView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        role_filter = request.query_params.get('role', None)
+        search = request.query_params.get('search', '')
+
+        users = User.objects.all().order_by('-date_joined')
+
+        if role_filter:
+            users = users.filter(role=role_filter)
+
+        if search:
+            users = users.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(department__icontains=search)
+            )
+
+        user_data = []
+        for u in users:
+            ticket_count = Ticket.objects.filter(
+                user=u,
+                status__in=['active', 'used']
+            ).count()
+            user_data.append({
+                'id': u.id,
+                'full_name': u.get_full_name() or u.email.split('@')[0],
+                'email': u.email,
+                'role': u.role,
+                'department': u.department or '',
+                'faculty': u.faculty or '',
+                'date_joined': u.date_joined.isoformat(),
+                'tickets_count': ticket_count,
+                'is_active': u.is_active,
+            })
+
+        return Response({
+            'total': len(user_data),
+            'users': user_data,
+        }, status=status.HTTP_200_OK)
 
 class EventAttendanceView(APIView):
     permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]

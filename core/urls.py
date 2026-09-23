@@ -7,7 +7,7 @@ from .views import (
     EventListCreateView, EventDetailView, RecommendedEventsView,
     FreeEventRegisterView, MyTicketsView, InitiatePaymentView, VerifyPaymentView,
     FCMTokenUpdateView, TestReminderView, ValidateTicketView,
-    DashboardView, EventAttendanceView, NotificationListView
+    DashboardView, EventAttendanceView, NotificationListView, AllUsersView
 )
 
 urlpatterns = [
@@ -39,4 +39,5 @@ urlpatterns = [
     
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('dashboard/events/<int:id>/attendance/', EventAttendanceView.as_view(), name='event-attendance'),
+    path('admin/users/', AllUsersView.as_view(), name='admin-users'),
 ]
