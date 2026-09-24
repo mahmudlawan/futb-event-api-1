@@ -87,11 +87,12 @@ class ProfilePictureUploadView(APIView):
         allowed_types = [
             'image/jpeg',
             'image/png',
-            'image/jpg'
+            'image/jpg',
+            'image/webp',
         ]
         if image_file.content_type not in allowed_types:
             return Response(
-                {'error': 'Only JPEG and PNG images are allowed'},
+                {'error': 'Only JPEG, PNG and WebP images are allowed'},
                 status=400
             )
 
