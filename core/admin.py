@@ -15,7 +15,6 @@ class CustomUserAdmin(BaseUserAdmin):
     full_name.short_description = 'Full Name'
 
     # ── Fieldsets shown on the User EDIT page ────────────────────────────────
-    # We extend the default fieldsets tuple by appending our custom section.
     fieldsets = BaseUserAdmin.fieldsets + (
         ('Campus Profile', {
             'fields': ('role', 'department', 'faculty', 'fcm_token'),
@@ -31,9 +30,22 @@ class CustomUserAdmin(BaseUserAdmin):
     )
 
 
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+    list_display = [
+        'title', 'category', 'event_type',
+        'status', 'date_time', 'venue',
+        'capacity', 'organiser'
+    ]
+    list_filter = ['category', 'event_type', 'status']
+    search_fields = ['title', 'venue']
+    ordering = ['-date_time']
+    # category, event_type, and status automatically render as
+    # dropdowns because the model fields have choices= defined.
+
+
 admin.site.register(User, CustomUserAdmin)
 admin.site.register(Interest)
-admin.site.register(Event)
 admin.site.register(Ticket)
 admin.site.register(Payment)
 admin.site.register(Notification)

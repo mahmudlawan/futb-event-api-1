@@ -1,0 +1,45 @@
+$kind: http-request
+order: 2000
+method: PATCH
+url: '{{base_url}}/api/auth/profile/update/'
+headers:
+  - key: Authorization
+    value: 'Bearer {{access_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "full_name": "Updated Test Name",
+      "department": "Software Engineering",
+      "faculty": "Computing",
+      "interests": ["academic", "sports"]
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 OK", function () {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("Response contains updated full_name", function () {
+          const json = pm.response.json();
+          pm.expect(json.full_name).to.eql("Updated Test Name");
+      });
+
+      pm.test("Response contains updated department", function () {
+          const json = pm.response.json();
+          pm.expect(json.department).to.eql("Software Engineering");
+      });
+
+      pm.test("Response contains updated faculty", function () {
+          const json = pm.response.json();
+          pm.expect(json.faculty).to.eql("Computing");
+      });
+
+      pm.test("Interests array is correct", function () {
+          const json = pm.response.json();
+          pm.expect(json.interests).to.include.members(["academic", "sports"]);
+      });

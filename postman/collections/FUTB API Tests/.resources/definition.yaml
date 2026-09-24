@@ -1,0 +1,9 @@
+$kind: collection
+name: FUTB API Tests
+description: |-
+  End-to-end tests for the FUTB Campus Event API authentication endpoints.
+  Covers Login (JWT), Profile Update (PATCH), and Change Password.
+
+  **Environment required:** FUTB API Tests
+  - {{base_url}} — e.g. http://127.0.0.1:8000
+  - {{access_token}} — auto-set by the Login request test script

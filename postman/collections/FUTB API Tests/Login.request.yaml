@@ -1,0 +1,44 @@
+$kind: http-request
+order: 1000
+method: POST
+url: '{{base_url}}/api/auth/login/'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "sukainatlawan@gmail.com",
+      "password": "Mah@236900_New"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200 OK", function () {
+          pm.response.to.have.status(200);
+      });
+
+      if (pm.response.code === 200) {
+          const json = pm.response.json();
+          pm.environment.set("access_token", json.access);
+
+          pm.test("Access token returned", function () {
+              pm.expect(json.access).to.be.a("string").and.not.empty;
+          });
+
+          pm.test("Refresh token returned", function () {
+              pm.expect(json.refresh).to.be.a("string").and.not.empty;
+          });
+
+          pm.test("Role is present", function () {
+              pm.expect(json.role).to.be.a("string").and.not.empty;
+          });
+
+          pm.test("Full name is present", function () {
+              pm.expect(json.full_name).to.be.a("string").and.not.empty;
+          });
+
+          console.log("✅ access_token saved to environment.");
+      }
