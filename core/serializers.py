@@ -30,8 +30,7 @@ class UserSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request:
                 return request.build_absolute_uri(obj.profile_picture.url)
-            base_url = 'http://10.0.2.2:8000'
-            return f"{base_url}{obj.profile_picture.url}"
+            return obj.profile_picture.url
         return None
 
 

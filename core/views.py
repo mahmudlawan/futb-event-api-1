@@ -89,8 +89,14 @@ class ProfilePictureUploadView(APIView):
             'image/png',
             'image/jpg',
             'image/webp',
+            'image/pjpeg',
+            'image/x-png',
         ]
-        if image_file.content_type not in allowed_types:
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+        content_type = getattr(image_file, 'content_type', '').lower()
+        ext = os.path.splitext(image_file.name)[1].lower() if image_file.name else ''
+
+        if (content_type not in allowed_types) and (ext not in allowed_extensions):
             return Response(
                 {'error': 'Only JPEG, PNG and WebP images are allowed'},
                 status=400
@@ -120,6 +126,9 @@ class ProfilePictureUploadView(APIView):
             context={'request': request}
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        return self.patch(request)
 
 
 
