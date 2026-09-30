@@ -855,6 +855,54 @@ class AllUsersView(APIView):
             'users': user_data,
         }, status=status.HTTP_200_OK)
 
+
+class UserRegisteredEventsView(APIView):
+    """Return all events a specific user has registered for (admin only)."""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request, user_id):
+        try:
+            target_user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        tickets = Ticket.objects.filter(
+            user=target_user,
+            status__in=['active', 'used', 'cancelled']
+        ).select_related('event').order_by('-issued_at')
+
+        events_data = []
+        for ticket in tickets:
+            event = ticket.event
+            events_data.append({
+                'ticket_id': ticket.id,
+                'ticket_status': ticket.status,
+                'ticket_type': ticket.ticket_type,
+                'issued_at': ticket.issued_at.isoformat(),
+                'event': {
+                    'id': event.id,
+                    'title': event.title,
+                    'date_time': event.date_time.isoformat(),
+                    'venue': event.venue,
+                    'category': event.category,
+                    'event_type': event.event_type,
+                    'status': event.status,
+                    'capacity': event.capacity,
+                },
+            })
+
+        return Response({
+            'user': {
+                'id': target_user.id,
+                'full_name': target_user.get_full_name() or target_user.email.split('@')[0],
+                'email': target_user.email,
+                'role': target_user.role,
+            },
+            'total': len(events_data),
+            'registered_events': events_data,
+        }, status=status.HTTP_200_OK)
+
+
 class EventAttendanceView(APIView):
     permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]
 
