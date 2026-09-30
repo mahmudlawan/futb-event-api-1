@@ -926,3 +926,149 @@ class NotificationListView(APIView):
         )
         serializer = NotificationSerializer(notifications, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/admin/events/<event_id>/announce/
+# Sends a custom email to every student with an active ticket for the event.
+# Admins can announce for any event; organisers only for their own.
+# ─────────────────────────────────────────────────────────────────────────────
+class AnnouncementView(APIView):
+    permission_classes = [IsAuthenticated, IsOrganiser | IsAdminRole]
+
+    def post(self, request, event_id):
+        # ── Get the event ──
+        try:
+            event = Event.objects.get(id=event_id, status='published')
+        except Event.DoesNotExist:
+            return Response(
+                {'error': 'Event not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── Permission check: organisers may only announce for their own events ──
+        if request.user.role == 'organiser' and event.organiser != request.user:
+            return Response(
+                {'error': 'You can only send announcements for your own events'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Validate payload ──
+        subject = str(request.data.get('subject', '')).strip()
+        message = str(request.data.get('message', '')).strip()
+
+        if not subject:
+            return Response(
+                {'error': 'Announcement subject is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not message:
+            return Response(
+                {'error': 'Announcement message is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(subject) > 150:
+            return Response(
+                {'error': 'Subject must be 150 characters or less'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(message) > 2000:
+            return Response(
+                {'error': 'Message must be 2000 characters or less'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Collect unique student emails ──
+        active_tickets = (
+            Ticket.objects
+            .filter(event=event, status__in=['active', 'used'])
+            .select_related('user')
+        )
+
+        if not active_tickets.exists():
+            return Response(
+                {'error': 'No registered students found for this event'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student_emails = list({
+            t.user.email for t in active_tickets if t.user.email
+        })
+        student_count = len(student_emails)
+
+        # ── Build the email body ──
+        full_message = (
+            f"Dear Student,\n\n"
+            f"You are receiving this announcement regarding the event "
+            f"you registered for:\n\n"
+            f"EVENT: {event.title}\n"
+            f"DATE:  {event.date_time.strftime('%A, %d %B %Y at %I:%M %p')}\n"
+            f"VENUE: {event.venue}\n\n"
+            f"{'─' * 50}\n\n"
+            f"{message}\n\n"
+            f"{'─' * 50}\n\n"
+            f"This message was sent by the event organiser through "
+            f"FUTB Smart Campus.\n\n"
+            f"FUTB Smart Campus Team\n"
+            f"Federal University of Technology, Babura\n"
+            f"support@futb.edu.ng"
+        )
+
+        # ── Send emails ──
+        sent_count = 0
+        failed_count = 0
+
+        for email in student_emails:
+            try:
+                send_mail(
+                    subject=f'[{event.title}] {subject}',
+                    message=full_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[email],
+                    fail_silently=False,
+                )
+                sent_count += 1
+            except Exception:
+                failed_count += 1
+
+        # ── Log the action ──
+        from .models import AdminLog
+        AdminLog.objects.create(
+            admin=request.user,
+            action_type='announcement',
+            target_id=event.id,
+            description=(
+                f'Sent announcement to {sent_count} student'
+                f'{"s" if sent_count != 1 else ""} for event: {event.title}. '
+                f'Subject: {subject}'
+            ),
+        )
+
+        # ── Return response ──
+        if failed_count == 0:
+            return Response({
+                'success': True,
+                'message': (
+                    f'Announcement sent successfully to {sent_count} '
+                    f'student{"s" if sent_count != 1 else ""}'
+                ),
+                'sent_count': sent_count,
+                'failed_count': 0,
+            }, status=status.HTTP_200_OK)
+
+        if sent_count > 0:
+            return Response({
+                'success': True,
+                'message': (
+                    f'Announcement sent to {sent_count} '
+                    f'student{"s" if sent_count != 1 else ""}. '
+                    f'{failed_count} delivery{"s" if failed_count != 1 else ""} failed.'
+                ),
+                'sent_count': sent_count,
+                'failed_count': failed_count,
+            }, status=status.HTTP_200_OK)
+
+        return Response(
+            {'error': 'Failed to send announcement. Please check email configuration and try again.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
