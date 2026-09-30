@@ -1,100 +1,245 @@
 import logging
-from datetime import timedelta
 from django.utils import timezone
-from core.models import Event, Notification
-from core.firebase import send_push_notification
-from core.email_utils import send_event_reminder_email
+from datetime import timedelta
+from django.core.mail import send_mail
+from django.conf import settings
+from .models import (
+  Event, Ticket, Notification, User
+)
 
 logger = logging.getLogger(__name__)
 
 def send_event_reminders():
-    """
-    Finds upcoming events in specific windows (24h, 2h, 30m before) and sends
-    reminders to users with active tickets.
-    """
-    now = timezone.now()
-    windows = [
-        {"minutes": 24 * 60, "name": "24 hours"},
-        {"minutes": 2 * 60, "name": "2 hours"},
-        {"minutes": 30, "name": "30 minutes"}
-    ]
+  """
+  Check all three reminder windows and 
+  send notifications to registered students.
+  This function is designed to be called 
+  every 5 minutes automatically.
+  """
+  
+  now = timezone.now()
+  logger.info(
+    f"[REMINDERS] Running at {now}"
+  )
+  print(
+    f"[REMINDERS] Running at {now}"
+  )
+  
+  total_sent = 0
+  
+  # Define the three reminder windows
+  # Each window has a centre point and 
+  # a ±5 minute tolerance
+  windows = [
+    {
+      'label': '24-hour',
+      'centre': now + timedelta(hours=24),
+      'tolerance': timedelta(minutes=5),
+    },
+    {
+      'label': '2-hour',
+      'centre': now + timedelta(hours=2),
+      'tolerance': timedelta(minutes=5),
+    },
+    {
+      'label': '30-minute',
+      'centre': now + timedelta(minutes=30),
+      'tolerance': timedelta(minutes=5),
+    },
+  ]
+  
+  for window in windows:
+    window_start = (
+      window['centre'] - window['tolerance']
+    )
+    window_end = (
+      window['centre'] + window['tolerance']
+    )
     
-    logger.info("Starting send_event_reminders task...")
-
-    for window in windows:
-        minutes = window["minutes"]
-        target_time = now + timedelta(minutes=minutes)
-        # 5 minute tolerance
-        start_time = target_time - timedelta(minutes=5)
-        end_time = target_time + timedelta(minutes=5)
-
-        events = Event.objects.filter(
-            date_time__gte=start_time,
-            date_time__lt=end_time,
-            status='upcoming'
+    # Find events in this window
+    events_in_window = Event.objects.filter(
+      date_time__gte=window_start,
+      date_time__lte=window_end,
+      status='published',
+    )
+    
+    if not events_in_window.exists():
+      print(
+        f"[REMINDERS] {window['label']} "
+        f"window: no events found"
+      )
+      continue
+    
+    print(
+      f"[REMINDERS] {window['label']} "
+      f"window: {events_in_window.count()} "
+      f"event(s) found"
+    )
+    
+    for event in events_in_window:
+      
+      # Get all students with active 
+      # tickets for this event
+      tickets = Ticket.objects.filter(
+        event=event,
+        status__in=['active', 'used']
+      ).select_related('user')
+      
+      if not tickets.exists():
+        print(
+          f"[REMINDERS]   {event.title}: "
+          f"no registered students"
         )
+        continue
+      
+      print(
+        f"[REMINDERS]   {event.title}: "
+        f"sending to {tickets.count()} "
+        f"student(s)"
+      )
+      
+      for ticket in tickets:
+        student = ticket.user
+        
+        # Skip if we already sent this 
+        # reminder to this student 
+        # for this event
+        # Check by looking for existing 
+        # notification in the same window
+        already_sent = Notification.objects\
+          .filter(
+            user=student,
+            event=event,
+            scheduled_time__gte=window_start,
+            scheduled_time__lte=window_end,
+            status='sent',
+          ).exists()
+        
+        if already_sent:
+          print(
+            f"[REMINDERS]     Skipping "
+            f"{student.email} — already sent"
+          )
+          continue
+        
+        # Build reminder message
+        time_label = window['label']
+        event_time_str = event.date_time\
+          .strftime('%A, %d %B %Y at %I:%M %p')
+        
+        subject = (
+          f"Reminder: {event.title} "
+          f"starts in {time_label}!"
+        )
+        
+        message = f"""
+Hello {student.first_name or student.email.split('@')[0]},
 
-        for event in events:
-            # Find all active tickets for this event
-            active_tickets = event.tickets.filter(status='active').select_related('user')
-            
-            for ticket in active_tickets:
-                user = ticket.user
-                event_title = event.title
-                
-                # Check if we already sent a reminder for this specific window/event to avoid duplicates
-                # We can check if a notification exists within the last 15 mins or so, but let's 
-                # just send it and rely on cron scheduling (run every 5 mins).
-                # Actually, to prevent spam if the cron runs twice in 5 mins:
-                recent_notification = Notification.objects.filter(
-                    user=user, 
-                    event=event,
-                    type='email',
-                    sent_at__gte=now - timedelta(minutes=10)
-                ).exists()
-                
-                if recent_notification:
-                    continue
+This is your {time_label} reminder for 
+the following event:
 
-                full_name = user.get_full_name() or user.username
-                
-                # 1. Send Email Reminder
-                email_success = send_event_reminder_email(
-                    user_email=user.email,
-                    user_full_name=full_name,
-                    event_title=event_title,
-                    event_date_time=event.date_time,
-                    event_venue=event.venue,
-                    minutes_before=minutes
-                )
-                
-                Notification.objects.create(
-                    user=user,
-                    event=event,
-                    type='email',
-                    message=f"Reminder: {event_title} starts in {window['name']}",
-                    sent_at=now if email_success else None,
-                    status='sent' if email_success else 'failed'
-                )
+EVENT:  {event.title}
+DATE:   {event_time_str}
+VENUE:  {event.venue}
 
-                # 2. Send Push Notification (if token exists)
-                if user.fcm_token:
-                    push_title = f"Upcoming Event: {event_title}"
-                    push_body = f"Starts in {window['name']} at {event.venue}"
-                    
-                    push_success = send_push_notification(
-                        fcm_token=user.fcm_token,
-                        title=push_title,
-                        body=push_body
-                    )
-                    
-                    Notification.objects.create(
-                        user=user,
-                        event=event,
-                        type='push',
-                        message=push_body,
-                        sent_at=now if push_success else None,
-                        status='sent' if push_success else 'failed'
-                    )
-                
-    logger.info("Completed send_event_reminders task.")
+Your QR ticket is ready in the 
+FUTB Smart Campus app under 
+"My Tickets". Please have it ready 
+to scan at the entrance.
+
+See you there!
+
+FUTB Smart Campus Team
+Federal University of Technology, Babura
+        """.strip()
+        
+        # Track success/failure
+        push_sent = False
+        email_sent = False
+        
+        # Send push notification via FCM
+        if student.fcm_token:
+          try:
+            from .firebase import \
+              send_push_notification
+            push_sent = send_push_notification(
+              fcm_token=student.fcm_token,
+              title=f"⏰ {time_label.title()} "
+                f"Reminder",
+              body=f"{event.title} starts "
+                f"in {time_label}! "
+                f"Check your QR ticket.",
+            )
+          except Exception as e:
+            logger.error(
+              f"FCM failed for "
+              f"{student.email}: {e}"
+            )
+            print(
+              f"[REMINDERS]     FCM FAILED "
+              f"for {student.email}: {e}"
+            )
+        
+        # Send email reminder
+        try:
+          send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings\
+              .DEFAULT_FROM_EMAIL,
+            recipient_list=[student.email],
+            fail_silently=False,
+          )
+          email_sent = True
+          print(
+            f"[REMINDERS]     Email sent "
+            f"to {student.email}"
+          )
+        except Exception as e:
+          logger.error(
+            f"Email failed for "
+            f"{student.email}: {e}"
+          )
+          print(
+            f"[REMINDERS]     Email FAILED "
+            f"for {student.email}: {e}"
+          )
+        
+        # Save notification record 
+        # regardless of outcome
+        if email_sent or push_sent:
+          Notification.objects.create(
+            user=student,
+            event=event,
+            type='push' if push_sent 
+              else 'email',
+            message=f"{time_label.title()} "
+              f"reminder: {event.title} "
+              f"starts in {time_label}.",
+            scheduled_time=window['centre'],
+            sent_at=timezone.now(),
+            status='sent',
+          )
+          total_sent += 1
+        else:
+          # Record the failure
+          Notification.objects.create(
+            user=student,
+            event=event,
+            type='email',
+            message=f"FAILED: {time_label} "
+              f"reminder for {event.title}",
+            scheduled_time=window['centre'],
+            sent_at=timezone.now(),
+            status='failed',
+          )
+  
+  print(
+    f"[REMINDERS] Complete. "
+    f"Total sent: {total_sent}"
+  )
+  logger.info(
+    f"[REMINDERS] Complete. "
+    f"Total sent: {total_sent}"
+  )
+  return total_sent

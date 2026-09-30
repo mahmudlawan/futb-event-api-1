@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'core',
+    'core.apps.CoreConfig',
 ]
 
 MIDDLEWARE = [
@@ -164,3 +164,27 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+LOGGING = {
+  'version': 1,
+  'disable_existing_loggers': False,
+  'handlers': {
+    'console': {
+      'class': 'logging.StreamHandler',
+    },
+    'file': {
+      'class': 'logging.FileHandler',
+      'filename': 'reminders.log',
+    },
+  },
+  'loggers': {
+    'core': {
+      'handlers': ['console', 'file'],
+      'level': 'INFO',
+      'propagate': True,
+    },
+    'apscheduler': {
+      'handlers': ['console'],
+      'level': 'WARNING',
+    },
+  },
+}
