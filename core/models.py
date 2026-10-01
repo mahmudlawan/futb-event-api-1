@@ -88,17 +88,59 @@ class Payment(models.Model):
     paid_at = models.DateTimeField(null=True, blank=True)
 
 class Notification(models.Model):
-    TYPE_CHOICES = (
-        ('push', 'Push'),
-        ('email', 'Email'),
+    REMINDER_TYPE_CHOICES = [
+        ('24h', '24-Hour Reminder'),
+        ('2h', '2-Hour Reminder'),
+        ('30m', '30-Minute Reminder'),
+        ('announcement', 'Announcement'),
+        ('general', 'General'),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='notifications'
     )
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
-    type = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    event = models.ForeignKey(
+        Event, on_delete=models.CASCADE,
+        null=True, blank=True,
+        related_name='notifications'
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=[
+            ('push', 'Push'),
+            ('email', 'Email'),
+            ('both', 'Both'),
+        ]
+    )
+    reminder_type = models.CharField(
+        max_length=20,
+        choices=REMINDER_TYPE_CHOICES,
+        default='general',
+    )
     message = models.TextField()
-    scheduled_time = models.DateTimeField(null=True, blank=True)
-    sent_at = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=20, default='pending')
+    scheduled_time = models.DateTimeField(
+        null=True, blank=True
+    )
+    sent_at = models.DateTimeField(
+        null=True, blank=True
+    )
+    status = models.CharField(
+        max_length=20,
+        default='sent',
+    )
+
+    class Meta:
+        unique_together = [
+            ['user', 'event', 'reminder_type']
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.reminder_type} reminder "
+            f"for {self.user.email} — "
+            f"{self.event.title if self.event else 'N/A'}"
+        )
 
 class AdminLog(models.Model):
     admin = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_logs')

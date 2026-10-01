@@ -136,13 +136,16 @@ class TicketSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Ticket
-        fields = ['id', 'event', 'ticket_type', 'status', 'issued_at', 'qr_code_image']
+        fields = ['id', 'event', 'ticket_type', 'status', 'issued_at', 'scanned_at', 'qr_code_image']
 
     def get_event(self, obj):
         return {
+            "id": obj.event.id,
             "title": obj.event.title,
-            "date_time": obj.event.date_time,
+            "date_time": obj.event.date_time.isoformat() if obj.event.date_time else None,
             "venue": obj.event.venue,
+            "category": obj.event.category,
+            "event_type": obj.event.event_type,
         }
 
     def get_qr_code_image(self, obj):
@@ -172,21 +175,26 @@ class FCMTokenSerializer(serializers.Serializer):
 # Notification serializer
 # ─────────────────────────────────────────────
 class NotificationSerializer(serializers.ModelSerializer):
+    event_title = serializers.SerializerMethodField()
     event = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
-        fields = ['id', 'event', 'type', 'message', 'scheduled_time', 'sent_at', 'status']
+        fields = ['id', 'event', 'event_title', 'type', 'reminder_type', 'message', 'scheduled_time', 'sent_at', 'status']
+
+    def get_event_title(self, obj):
+        return obj.event.title if obj.event else None
 
     def get_event(self, obj):
-        if obj.event:
-            return {
-                "id": obj.event.id,
-                "title": obj.event.title,
-                "date_time": obj.event.date_time,
-                "venue": obj.event.venue,
-            }
-        return None
+        if not obj.event:
+            return None
+        return {
+            "id": obj.event.id,
+            "title": obj.event.title,
+            "date_time": obj.event.date_time.isoformat() if obj.event.date_time else None,
+            "venue": obj.event.venue,
+            "category": obj.event.category,
+        }
 
 # ─────────────────────────────────────────────
 # Profile update serializer

@@ -101,145 +101,124 @@ def send_event_reminders():
       for ticket in tickets:
         student = ticket.user
         
-        # Skip if we already sent this 
-        # reminder to this student 
-        # for this event
-        # Check by looking for existing 
-        # notification in the same window
-        already_sent = Notification.objects\
-          .filter(
-            user=student,
-            event=event,
-            scheduled_time__gte=window_start,
-            scheduled_time__lte=window_end,
-            status='sent',
-          ).exists()
+        # Map window label to reminder_type
+        reminder_type_map = {
+          '24-hour': '24h',
+          '2-hour': '2h', 
+          '30-minute': '30m',
+        }
+        reminder_type = reminder_type_map.get(
+          window['label'], 'general'
+        )
         
-        if already_sent:
+        # Try to create a notification record
+        # If it already exists (unique_together constraint), get_or_create returns 
+        # created=False and we skip sending
+        notification, created = Notification.objects.get_or_create(
+          user=student,
+          event=event,
+          reminder_type=reminder_type,
+          defaults={
+            'type': 'email',
+            'message': (
+              f"{window['label'].title()} "
+              f"reminder: {event.title}"
+            ),
+            'scheduled_time': window['centre'],
+            'sent_at': timezone.now(),
+            'status': 'pending',
+          }
+        )
+        
+        if not created:
           print(
-            f"[REMINDERS]     Skipping "
-            f"{student.email} — already sent"
+            f"[REMINDERS]     SKIPPING "
+            f"{student.email} — "
+            f"{reminder_type} reminder "
+            f"already sent for "
+            f"{event.title}"
           )
           continue
         
-        # Build reminder message
-        time_label = window['label']
-        event_time_str = event.date_time\
-          .strftime('%A, %d %B %Y at %I:%M %p')
-        
-        subject = (
-          f"Reminder: {event.title} "
-          f"starts in {time_label}!"
-        )
-        
-        message = f"""
-Hello {student.first_name or student.email.split('@')[0]},
-
-This is your {time_label} reminder for 
-the following event:
-
-EVENT:  {event.title}
-DATE:   {event_time_str}
-VENUE:  {event.venue}
-
-Your QR ticket is ready in the 
-FUTB Smart Campus app under 
-"My Tickets". Please have it ready 
-to scan at the entrance.
-
-See you there!
-
-FUTB Smart Campus Team
-Federal University of Technology, Babura
-        """.strip()
-        
-        # Track success/failure
+        # Record is new — proceed with sending
         push_sent = False
         email_sent = False
         
-        # Send push notification via FCM
+        # Send FCM push notification
         if student.fcm_token:
           try:
-            from .firebase import \
-              send_push_notification
+            from .firebase import send_push_notification
             push_sent = send_push_notification(
               fcm_token=student.fcm_token,
-              title=f"⏰ {time_label.title()} "
-                f"Reminder",
-              body=f"{event.title} starts "
-                f"in {time_label}! "
-                f"Check your QR ticket.",
+              title=(
+                f"⏰ {window['label'].title()} Reminder"
+              ),
+              body=(
+                f"{event.title} starts in "
+                f"{window['label']}! "
+                f"Check your QR ticket."
+              ),
             )
           except Exception as e:
-            logger.error(
-              f"FCM failed for "
-              f"{student.email}: {e}"
-            )
             print(
-              f"[REMINDERS]     FCM FAILED "
-              f"for {student.email}: {e}"
+              f"[REMINDERS]     FCM FAILED for {student.email}: {e}"
             )
         
         # Send email reminder
         try:
-          send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings\
-              .DEFAULT_FROM_EMAIL,
-            recipient_list=[student.email],
-            fail_silently=False,
+          from .email_utils import send_event_reminder_email
+          email_sent = send_event_reminder_email(
+            user_email=student.email,
+            user_full_name=(
+              student.get_full_name() or student.email.split('@')[0]
+            ),
+            event_title=event.title,
+            event_date_time=event.date_time,
+            event_venue=event.venue,
+            minutes_before=(
+              24 * 60 if '24' in window['label']
+              else 120 if '2-hour' in window['label']
+              else 30
+            ),
           )
-          email_sent = True
-          print(
-            f"[REMINDERS]     Email sent "
-            f"to {student.email}"
-          )
+          if email_sent:
+            print(
+              f"[REMINDERS]     Email sent to {student.email}"
+            )
+          else:
+            print(
+              f"[REMINDERS]     Email FAILED for {student.email}"
+            )
         except Exception as e:
-          logger.error(
-            f"Email failed for "
-            f"{student.email}: {e}"
-          )
           print(
-            f"[REMINDERS]     Email FAILED "
-            f"for {student.email}: {e}"
+            f"[REMINDERS]     Email FAILED for {student.email}: {e}"
           )
         
-        # Save notification record 
-        # regardless of outcome
+        # Update notification record with actual result
         if email_sent or push_sent:
-          Notification.objects.create(
-            user=student,
-            event=event,
-            type='push' if push_sent 
-              else 'email',
-            message=f"{time_label.title()} "
-              f"reminder: {event.title} "
-              f"starts in {time_label}.",
-            scheduled_time=window['centre'],
-            sent_at=timezone.now(),
-            status='sent',
+          notification.type = (
+            'both' if (email_sent and push_sent)
+            else 'push' if push_sent
+            else 'email'
           )
+          notification.status = 'sent'
+          notification.sent_at = timezone.now()
+          notification.save()
           total_sent += 1
+          print(
+            f"[REMINDERS]     Notification record saved (ID: {notification.id})"
+          )
         else:
-          # Record the failure
-          Notification.objects.create(
-            user=student,
-            event=event,
-            type='email',
-            message=f"FAILED: {time_label} "
-              f"reminder for {event.title}",
-            scheduled_time=window['centre'],
-            sent_at=timezone.now(),
-            status='failed',
+          # Both failed — delete the record so it can be retried next run
+          notification.delete()
+          print(
+            f"[REMINDERS]     All delivery methods failed for {student.email} — will retry next run"
           )
   
   print(
-    f"[REMINDERS] Complete. "
-    f"Total sent: {total_sent}"
+    f"[REMINDERS] Complete. Total sent: {total_sent}"
   )
   logger.info(
-    f"[REMINDERS] Complete. "
-    f"Total sent: {total_sent}"
+    f"[REMINDERS] Complete. Total sent: {total_sent}"
   )
   return total_sent
