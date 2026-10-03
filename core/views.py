@@ -17,6 +17,17 @@ import os
 import secrets
 import requests
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import api_view, permission_classes
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    return Response({
+        'status': 'healthy',
+        'service': 'FUTB Smart Campus API',
+        'version': '1.0.0',
+    })
+
 # POST /api/auth/register/
 class RegisterView(APIView):
     permission_classes = [AllowAny]

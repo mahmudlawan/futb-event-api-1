@@ -8,10 +8,11 @@ from .views import (
     FreeEventRegisterView, MyTicketsView, InitiatePaymentView, VerifyPaymentView,
     FCMTokenUpdateView, TestReminderView, ValidateTicketView,
     DashboardView, EventAttendanceView, NotificationListView, AllUsersView,
-    AnnouncementView, UserRegisteredEventsView,
+    AnnouncementView, UserRegisteredEventsView, health_check,
 )
 
 urlpatterns = [
+    path('health/', health_check, name='health-check'),
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='login'),
     path('auth/login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
