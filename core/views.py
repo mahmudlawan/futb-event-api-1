@@ -22,10 +22,25 @@ from rest_framework.decorators import api_view, permission_classes
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
+    db_status = 'ok'
+    db_error = None
+    user_count = 0
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1;")
+        user_count = User.objects.count()
+    except Exception as e:
+        db_status = 'error'
+        db_error = str(e)
+
     return Response({
-        'status': 'healthy',
+        'status': 'healthy' if db_status == 'ok' else 'degraded',
         'service': 'FUTB Smart Campus API',
         'version': '1.0.0',
+        'database': db_status,
+        'user_count': user_count,
+        'db_error': db_error,
     })
 
 # POST /api/auth/register/
