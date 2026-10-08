@@ -25,6 +25,18 @@ def health_check(request):
     db_status = 'ok'
     db_error = None
     user_count = 0
+    migration_output = None
+
+    if request.query_params.get('run_migrate') == 'true':
+        try:
+            from django.core.management import call_command
+            import io
+            out = io.StringIO()
+            call_command('migrate', interactive=False, stdout=out)
+            migration_output = out.getvalue()
+        except Exception as e:
+            migration_output = f"Migration failed: {e}"
+
     try:
         from django.db import connection
         with connection.cursor() as cursor:
@@ -41,6 +53,7 @@ def health_check(request):
         'database': db_status,
         'user_count': user_count,
         'db_error': db_error,
+        'migration_output': migration_output,
     })
 
 # POST /api/auth/register/
