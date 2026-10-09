@@ -57,7 +57,7 @@ def health_check(request):
                 from django.core.management import call_command
                 import io
                 out = io.StringIO()
-                call_command('seed_production', interactive=False, stdout=out)
+                call_command('seed_production', stdout=out)
                 seed_output = out.getvalue()
                 user_count = User.objects.count()
                 event_count = Event.objects.count()
