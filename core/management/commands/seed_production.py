@@ -12,34 +12,105 @@ class Command(BaseCommand):
 
         self.stdout.write("Seeding production database...")
 
-        # 1. Super Admin User
-        admin_email = 'amhmudlawanalkasim@gmail.com'
-        admin_user, created = User.objects.get_or_create(
-            email=admin_email,
+        # 0. Import pre-production accounts from users_dump.json
+        import os, json
+        dump_path = os.path.join(os.path.dirname(__file__), 'users_dump.json')
+        if os.path.exists(dump_path):
+            try:
+                with open(dump_path, 'r', encoding='utf-8') as f:
+                    dumped_users = json.load(f)
+                imported_count = 0
+                for u in dumped_users:
+                    email = u.get('email', '').strip()
+                    if not email:
+                        continue
+                    u_obj, _ = User.objects.get_or_create(
+                        email=email,
+                        defaults={
+                            'username': u.get('username') or email,
+                            'first_name': u.get('first_name', ''),
+                            'last_name': u.get('last_name', ''),
+                            'role': u.get('role', 'student'),
+                            'department': u.get('department', ''),
+                            'faculty': u.get('faculty', ''),
+                            'is_staff': u.get('is_staff', False),
+                            'is_superuser': u.get('is_superuser', False),
+                        }
+                    )
+                    # Restore exact hashed password from pre-production
+                    if u.get('password'):
+                        u_obj.password = u['password']
+                    u_obj.role = u.get('role', 'student')
+                    u_obj.is_staff = u.get('is_staff', False)
+                    u_obj.is_superuser = u.get('is_superuser', False)
+                    u_obj.save()
+                    imported_count += 1
+                self.stdout.write(f"Restored {imported_count} pre-production user accounts.")
+            except Exception as e:
+                self.stdout.write(f"Warning: could not import users_dump: {e}")
+
+        # 1. Guaranteed Super Admin Users (Both correct spelling and previous typo)
+        for admin_email in ['mahmudlawanalkasim@gmail.com', 'amhmudlawanalkasim@gmail.com']:
+            admin_user, _ = User.objects.get_or_create(
+                email=admin_email,
+                defaults={
+                    'username': admin_email.split('@')[0],
+                    'first_name': 'Mahmud',
+                    'last_name': 'Lawan Alkasim',
+                    'role': 'admin',
+                    'is_staff': True,
+                    'is_superuser': True,
+                    'department': 'Computer Science',
+                    'faculty': 'Science',
+                }
+            )
+            admin_user.set_password('Mah@236900')
+            admin_user.role = 'admin'
+            admin_user.is_staff = True
+            admin_user.is_superuser = True
+            admin_user.save()
+            for cat in ['technology', 'academic']:
+                Interest.objects.get_or_create(user=admin_user, category=cat)
+            self.stdout.write(f"Super admin confirmed: {admin_email}")
+
+        # Guaranteed Organiser
+        org_user, _ = User.objects.get_or_create(
+            email='abutturab236900@gmail.com',
             defaults={
-                'username': 'amhmudlawanalkasim',
+                'username': 'MAHMUD',
                 'first_name': 'Mahmud',
-                'last_name': 'Lawan Alkasim',
-                'role': 'admin',
+                'last_name': 'Lawan',
+                'role': 'organiser',
                 'is_staff': True,
-                'is_superuser': True,
-                'department': 'Computer Science',
-                'faculty': 'Science',
             }
         )
-        admin_user.set_password('Mah@236900')
-        admin_user.role = 'admin'
-        admin_user.is_staff = True
-        admin_user.is_superuser = True
-        admin_user.save()
+        org_user.set_password('Mah@236900')
+        org_user.role = 'organiser'
+        org_user.is_staff = True
+        org_user.save()
+        self.stdout.write("Organiser confirmed: abutturab236900@gmail.com")
 
-        # Add interests for admin
-        for cat in ['technology', 'academic']:
-            Interest.objects.get_or_create(user=admin_user, category=cat)
+        # Guaranteed Student accounts with Mah@236900
+        for s_email, s_name in [
+            ('sukainatlawan@gmail.com', 'Sukainat'),
+            ('aliyulawan@gmail.com', 'Aliyu'),
+            ('ahmadlawan@gmail.com', 'Ahmad'),
+        ]:
+            stu_obj, _ = User.objects.get_or_create(
+                email=s_email,
+                defaults={
+                    'username': s_name,
+                    'first_name': s_name,
+                    'last_name': 'Lawan',
+                    'role': 'student',
+                }
+            )
+            stu_obj.set_password('Mah@236900')
+            stu_obj.role = 'student'
+            stu_obj.save()
+            self.stdout.write(f"Student confirmed: {s_email}")
 
-        self.stdout.write(f"Super admin {'created' if created else 'updated'}: {admin_email}")
-
-        # 2. Student Demo User
+        # 2. Student Demo Users
         student_email = 'student@futb.edu.ng'
         student_user, _ = User.objects.get_or_create(
             email=student_email,

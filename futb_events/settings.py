@@ -193,7 +193,7 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='FUTB Smart Campus <no
 FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='firebase-credentials.json')
 
 # ── Paystack ─────────────────────────────
-PAYSTACK_SECRET_KEY = config('PAYSTACK_SECRET_KEY', default='')
+PAYSTACK_SECRET_KEY = config('PAYSTACK_SECRET_KEY', default='sk_test_815af2fe0b986e1f0baa9f5caa6686b2ac871ee6')
 
 # ── Google OAuth ──────────────────────────
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
