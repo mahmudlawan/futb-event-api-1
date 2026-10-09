@@ -25,7 +25,9 @@ def health_check(request):
     db_status = 'ok'
     db_error = None
     user_count = 0
+    event_count = 0
     migration_output = None
+    seed_output = None
 
     if request.query_params.get('run_migrate') == 'true':
         try:
@@ -42,6 +44,26 @@ def health_check(request):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1;")
         user_count = User.objects.count()
+        event_count = Event.objects.count()
+
+        # Auto-seed if super admin or events don't exist, or explicitly requested
+        should_seed = (
+            request.query_params.get('seed_data') == 'true' or
+            request.query_params.get('seed_admin') == 'true' or
+            not User.objects.filter(email='amhmudlawanalkasim@gmail.com').exists()
+        )
+        if should_seed:
+            try:
+                from django.core.management import call_command
+                import io
+                out = io.StringIO()
+                call_command('seed_production', interactive=False, stdout=out)
+                seed_output = out.getvalue()
+                user_count = User.objects.count()
+                event_count = Event.objects.count()
+            except Exception as e:
+                seed_output = f"Seed error: {e}"
+
     except Exception as e:
         db_status = 'error'
         db_error = str(e)
@@ -52,8 +74,10 @@ def health_check(request):
         'version': '1.0.0',
         'database': db_status,
         'user_count': user_count,
+        'event_count': event_count,
         'db_error': db_error,
         'migration_output': migration_output,
+        'seed_output': seed_output,
     })
 
 # POST /api/auth/register/

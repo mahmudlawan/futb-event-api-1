@@ -52,6 +52,7 @@ INSTALLED_APPS = [
 
 # ── Middleware ───────────────────────────
 MIDDLEWARE = [
+  'django.middleware.gzip.GZipMiddleware',
   'django.middleware.security.SecurityMiddleware',
   'whitenoise.middleware.WhiteNoiseMiddleware',
   # WhiteNoise must be second after security
