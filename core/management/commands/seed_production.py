@@ -183,9 +183,10 @@ class Command(BaseCommand):
         Payment.objects.get_or_create(
             ticket=paid_ticket,
             defaults={
+                'event': paid_event,
                 'user': student_user,
                 'amount': 500.00,
-                'reference': f'FUTB-REF-{secrets.token_hex(6)}',
+                'paystack_ref': f'FUTB-REF-{secrets.token_hex(6)}',
                 'status': 'success',
                 'paid_at': now - timedelta(days=1),
             }
@@ -195,7 +196,7 @@ class Command(BaseCommand):
         Notification.objects.get_or_create(
             user=admin_user,
             event=first_event,
-            type='event_reminder_24h',
+            type='push',
             defaults={
                 'title': 'Welcome to FUTB Smart Campus!',
                 'body': 'Your production environment has been initialized with super admin access and verified campus events.',
